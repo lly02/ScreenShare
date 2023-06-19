@@ -1,5 +1,4 @@
-﻿using ScreenShare.ViewModel;
-using System;
+﻿using System;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -12,11 +11,11 @@ namespace ScreenShare.Recorder
 {
     public class ScreenRecorder : IScreenRecorder
     {
-        private Rectangle bounds;
+        private Rectangle _bounds;
 
         public ScreenRecorder() 
         {
-            bounds = Screen.AllScreens[0].Bounds;
+            _bounds = Screen.PrimaryScreen!.Bounds;
         }
 
         [DllImport("gdi32.dll")]
@@ -40,13 +39,22 @@ namespace ScreenShare.Recorder
 
         public ImageSource GetFrame()
         {
-            System.Drawing.Size sz = Screen.PrimaryScreen.Bounds.Size;
+            //System.Drawing.Size sz = Screen.PrimaryScreen!.Bounds.Size;
             IntPtr hDesk = GetDesktopWindow();
             IntPtr hSrce = GetWindowDC(hDesk);
             IntPtr hDest = CreateCompatibleDC(hSrce);
-            IntPtr hBmp = CreateCompatibleBitmap(hSrce, sz.Width, sz.Height);
+            IntPtr hBmp = CreateCompatibleBitmap(hSrce, _bounds.Width, _bounds.Height);
             IntPtr hOldBmp = SelectObject(hDest, hBmp);
-            bool b = BitBlt(hDest, 0, 0, sz.Width, sz.Height, hSrce, 0, 0, CopyPixelOperation.SourceCopy | CopyPixelOperation.CaptureBlt);
+            BitBlt(
+                hDest, 
+                0, 
+                0, 
+                _bounds.Width, 
+                _bounds.Height, 
+                hSrce, 
+                0, 
+                0, 
+                CopyPixelOperation.SourceCopy | CopyPixelOperation.CaptureBlt);
             SelectObject(hDest, hOldBmp);
             BitmapSource source;
             try
@@ -62,6 +70,7 @@ namespace ScreenShare.Recorder
                 DeleteObject(hBmp);
                 DeleteDC(hDest);
                 ReleaseDC(hDesk, hSrce);
+                ReleaseDC(IntPtr.Zero, hSrce);
             }
             
             return source;

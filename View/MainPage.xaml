@@ -19,7 +19,8 @@
         </Grid.RowDefinitions>
         <Image Source="{Binding Screen, Mode=OneWay}"></Image>
         <Button Grid.Row="1" 
-                Command="{Binding StartShareCommand}">Start screen share</Button>
+                Command="{Binding StartShareCommand}"
+                Content="{Binding ScreenShareButtonContent, Mode=OneWay}"></Button>
         <Button Grid.Row="2">Start voice</Button>
     </Grid>
 </Window>
