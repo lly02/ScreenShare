@@ -6,6 +6,7 @@ using System.Windows.Forms;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using ScreenShare.Recorder.Interface;
 
 namespace ScreenShare.Recorder
 {

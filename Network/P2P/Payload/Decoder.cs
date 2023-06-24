@@ -1,55 +1,145 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
+using System.Collections.Generic;
+using ScreenShare.Network.P2P.Interface;
+using System.Xml.Serialization;
+using Accessibility;
 
 namespace ScreenShare.Network.P2P.Payload;
 
-public class Decoder
+public class Decoder : IDecoder
 {
-    public byte[]? Payload;
-    public bool IsFinal = false;
-    public bool IsMasked = false;
-    public StringBuilder PayloadData = new StringBuilder();
-    public int PayloadLength = 0;
-    public PayloadType PayloadType;
+    public byte[]? Payload { get; private set; }
+    public bool IsPayloadFullyReceived { get; private set; } = true;
+    public bool IsFinal { get; private set; } = false;
+    public bool IsMasked { get; private set; } = false;
+    public List<byte[]> PayloadData { get; private set; } = new List<byte[]> ();
+    public int PayloadLength { get; private set; } = 0;
+    public PayloadType PayloadType { get; private set; }
 
     private int _currentByte = 0;
     private byte[] _maskingKey = new byte[4];
+    private int _step = 1;
 
     public void Decode(byte[] bytes)
     {
-        Payload = bytes;
-        PayloadLength = 0;
+        AppendPayload(bytes);
+        //PayloadLength = 0;
         _currentByte = 0;
-        _maskingKey = new byte[4];
+        //_maskingKey = new byte[4];
 
-        // 1. First part (FIN, RSV, Opcode)
-        string first = Base10toBase2(Payload[_currentByte]);
-        CheckIsFinal(first);
-        CheckPayloadType(first);
-        Next();
-
-        // 2. Second part (Mask, payload length)
-        string second = Base10toBase2(Payload[_currentByte]);
-        CheckIsMasked(second);
-        CheckPayloadLength(bytes[1]);
-        Next();
-
-        // 3. Third part (Masking-key)
-        if (IsMasked)
+        try
         {
-            GetMaskingKey();
+            DecodePayload();
+        } 
+        catch (IncompleteDataException)
+        {
+            return;
+        }
+    }
+
+    public byte[]? ReadData()
+    {
+        if (PayloadData.Count == 0)
+        {
+            return null;
         }
 
-        // 4. Decode
-        Decode();
+        byte[] ReturnData = PayloadData[0];
+        PayloadData.RemoveAt(0);
+
+        return ReturnData;
+    }
+
+    private void DecodePayload()
+    {
+        switch (_step)
+        {
+            // 1. First part (FIN, RSV, Opcode)
+            case 1:
+                string first = Base10toBase2(Payload![_currentByte]);
+                CheckIsFinal(first);
+                CheckPayloadType(first);
+                NextByte();
+                NextStep();
+                goto case 2;
+
+            // 2. Second part (Mask, payload length)
+            case 2:
+                if (!CheckByteExists())
+                {
+                    throw new IncompleteDataException();
+                }
+
+                string second = Base10toBase2(Payload![_currentByte]);
+                CheckIsMasked(second);
+                CheckPayloadLength(Payload[_currentByte]);
+                NextByte();
+                NextStep();
+                goto case 3;
+
+            // 3. Third part (Masking-key)
+            case 3:
+                if (IsMasked)
+                {
+                    if (!CheckIsMaskingKeyFullyReceived())
+                    {
+                        throw new IncompleteDataException();
+                    }
+
+                    GetMaskingKey();
+                }
+                NextStep();
+                goto case 4;
+
+            // 4. Decode
+            case 4:
+                if (!CheckIsPayloadFullyReceived())
+                {
+                    throw new IncompleteDataException();
+                }
+
+                Decode();
+                NextStep();
+                goto case 5;
+
+            // 5. If have next payload
+            case 5:
+                if (CheckLeftoverBytes())
+                {
+                    RemoveUnnecessaryBytes();
+                    ResetDecoder();
+                    DecodePayload();
+                }
+                else
+                {
+                    goto case 6;
+                }
+                break;
+
+            // 6. No more payload left to decode, reset the decoder.
+            case 6:
+                ResetDecoder();
+                Payload = null;
+                break;
+
+        }
     }
 
     private string Base10toBase2(int base10)
     {
-        return Convert.ToString(base10, 2);
+        string base2 = Convert.ToString(base10, 2);
+        if (base2.Length != 8)
+        {
+            string add0 = "";
+            for (int i = 0; i < 8 - base2.Length; i++)
+            {
+                add0 += "0";
+            }
+            base2 = add0 + base2;
+        }
+        return base2;
     }
 
     private string Base2toBase10(string base2)
@@ -95,7 +185,7 @@ public class Decoder
             b -= 128;
         }
 
-        if (b < 125)
+        if (b <= 125)
         {
             PayloadLength = b;
             return;
@@ -107,7 +197,7 @@ public class Decoder
         }
         if (b == 127)
         {
-            GetPayloadLength(4);
+            GetPayloadLength(8);
             return;
         }
 
@@ -120,7 +210,7 @@ public class Decoder
 
         for (int i = 0; i < iterate; i++)
         {
-            Next();
+            NextByte();
             b += Base10toBase2(Payload![_currentByte]);
         }
 
@@ -132,12 +222,23 @@ public class Decoder
         PayloadLength = Convert.ToInt32(Base2toBase10(b));
     }
 
+    private bool CheckIsPayloadFullyReceived()
+    {
+        IsPayloadFullyReceived = PayloadLength - 1 <= Payload!.Length - _currentByte;
+        return IsPayloadFullyReceived;
+    }
+
+    private bool CheckIsMaskingKeyFullyReceived()
+    {
+        return Payload!.Length >= _currentByte + 3;
+    }
+
     private void GetMaskingKey()
     {
         for (int i = 0; i < 4; i++)
         {
             _maskingKey[i] = Payload![_currentByte];
-            Next();
+            NextByte();
         }
     }
 
@@ -145,16 +246,68 @@ public class Decoder
     {
         byte[] decoded = new byte[PayloadLength];
 
-        for (int i = 0; i < decoded.Length; i++)
+        for (int i = 0; i < PayloadLength; i++)
         {
             decoded[i] = (byte)(Payload![_currentByte + i] ^ _maskingKey[i % 4]);
         }
 
-        PayloadData.Append(Encoding.UTF8.GetString(decoded));
+        PayloadData.Add(decoded);
     }
 
-    private void Next()
+    private void NextByte()
     {
         _currentByte += 1;
+    }
+
+    private void NextStep()
+    {
+        _step += 1;
+    }
+
+    private void ResetDecoder()
+    {
+        //Payload = null;
+        IsFinal = false;
+        IsMasked = false;
+        //PayloadData = new List<StringBuilder>();
+        PayloadLength = 0;
+        _currentByte = 0;
+        _maskingKey = new byte[4];
+        _step = 1;
+    }
+    
+    private void RemoveUnnecessaryBytes()
+    {
+        int NewPayloadLength = Payload!.Length - (PayloadLength + _currentByte);
+        byte[] NewPayload = new byte[NewPayloadLength];
+
+        Array.Copy(Payload, PayloadLength + _currentByte, NewPayload, 0, NewPayloadLength);
+        Payload = NewPayload;
+    }
+
+    private bool CheckLeftoverBytes()
+    {
+        return Payload!.Length - _currentByte > PayloadLength;
+    }
+
+    private bool CheckByteExists()
+    {
+        return Payload!.Length > _currentByte;
+    }
+
+    private void AppendPayload(byte[] bytes)
+    {
+        if (Payload == null)
+        {
+            Payload = bytes;
+            return;
+        }
+
+        int NewPayloadLength = bytes.Length + Payload!.Length;
+        byte[] NewPayload = new byte[NewPayloadLength];
+
+        Payload.CopyTo(NewPayload, 0);
+        bytes.CopyTo(NewPayload, Payload.Length);
+        Payload = NewPayload;
     }
 }

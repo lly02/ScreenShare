@@ -13,6 +13,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ScreenShare.Network.P2P;
 using ScreenShare.Recorder;
+using ScreenShare.Recorder.Interface;
 using ScreenShare.View;
 using ScreenShare.ViewModel;
 
@@ -38,7 +39,7 @@ public partial class App : Application
         });
         AppHost = builder.Build();
 
-        var logInPage = AppHost!.Services.GetRequiredService<MainPage>();
+        var logInPage = AppHost!.Services.GetRequiredService<LogIn>();
         logInPage.InitializeComponent();
         logInPage.Show();
     }

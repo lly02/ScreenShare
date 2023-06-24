@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Drawing.Printing;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -18,8 +20,9 @@ public class Server
 {
     private TcpListener? _server;
     private TcpClient? _client;
-    private ILogger<Server> _logger;
-    private Payload.Decoder _decoder;
+    private NetworkStream? _stream;
+    private readonly ILogger<Server> _logger;
+    private readonly Payload.Decoder _decoder;
 
     public Server(ILogger<Server> logger, Payload.Decoder decoder)
     {
@@ -42,33 +45,28 @@ public class Server
         _client = _server.AcceptTcpClient();
         _logger.LogInformation("A client connected.");
 
-        NetworkStream stream = _client.GetStream();
+        _stream = _client.GetStream();
 
         while (true)
         {
-            while (!stream.DataAvailable) ;
-
             while (_client.Available < 3)
             {
-                // wait for enough bytes to be available
             }
 
-            byte[] bytes = new byte[_client.Available];
+            byte[] bytes = new byte[_client!.Available];
+            _stream!.Read(bytes, 0, bytes.Length);
 
-            stream.Read(bytes, 0, bytes.Length);
-
-            //translate bytes of request to string
             string data = Encoding.UTF8.GetString(bytes);
 
-            if (isHandshake(data))
+            if (IsHandshake(data))
             {
-                const string eol = "\r\n"; // HTTP/1.1 defines the sequence CR LF as the end-of-line marker
+                string eol = "\r\n"; // HTTP/1.1 defines the sequence CR LF as the end-of-line marker
 
                 byte[] response = Encoding.UTF8.GetBytes("HTTP/1.1 101 Switching Protocols" + eol
                     + "Connection: Upgrade" + eol
                     + "Upgrade: websocket" + eol
                     + "Sec-WebSocket-Accept: " + Convert.ToBase64String(
-                        System.Security.Cryptography.SHA1.Create().ComputeHash(
+                        SHA1.Create().ComputeHash(
                             Encoding.UTF8.GetBytes(
                                 new Regex("Sec-WebSocket-Key: (.*)").Match(data).Groups[1].Value.Trim() + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
                             )
@@ -76,18 +74,52 @@ public class Server
                     ) + eol
                     + eol);
 
-                stream.Write(response, 0, response.Length);
+                _stream.Write(response, 0, response.Length);
+
+                break;
             }
-            else
+        }
+
+        while(true)
+        {
+            List<byte[]?> bytes = ReceiveFullData();
+
+            for (int i = 0; i < bytes.Count; i++)
             {
-                _decoder.Decode(bytes);
-                _logger.LogInformation(_decoder.PayloadData.ToString());
+                string data = Encoding.UTF8.GetString(bytes[i]!);
+
+                _logger.LogInformation(
+                    "Payload received \n" +
+                    "Data: {_decoder.PayloadData} \n",
+                    data + "\n");
             }
         }
     }
 
-    public bool isHandshake(string data)
+    private bool IsHandshake(string data)
     {
         return new Regex("^GET").IsMatch(data);
+    }
+
+    private List<byte[]?> ReceiveFullData()
+    {
+        List<byte[]?> ReadData = new List<byte[]?>(); 
+
+        while (ReadData.Count == 0)
+        {
+            while (!_stream!.DataAvailable) ;
+
+            byte[] bytes = new byte[_client!.Available];
+            _stream!.Read(bytes, 0, bytes.Length);
+
+            _decoder.Decode(bytes);
+
+            while (_decoder.PayloadData.Count > 0)
+            {
+                ReadData.Add(_decoder.ReadData()!);
+            }
+        }
+        
+        return ReadData;
     }
 }

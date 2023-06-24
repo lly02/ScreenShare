@@ -1,4 +1,4 @@
-﻿using ScreenShare.Recorder;
+﻿using ScreenShare.Recorder.Interface;
 using System;
 using System.ComponentModel;
 using System.Drawing;
@@ -17,14 +17,15 @@ namespace ScreenShare.ViewModel;
 
 public class MainPageViewModel : INotifyPropertyChanged
 {
-    private DispatcherOperation? _dispatcherOperation;
-
     private ImageSource? _screen;
     private string _screenShareButtonContent;
     private IScreenRecorder _screenRecorder;
     private bool _isRecording;
     private System.Timers.Timer _recorderLoop;
     private int _recordFps;
+
+    private string _voiceButtonContent;
+    private bool _isMuted;
 
     public DelegateCommand StartShareCommand { get; private set; }
     public DelegateCommand StartVoiceCommand { get; private set; }
@@ -35,13 +36,16 @@ public class MainPageViewModel : INotifyPropertyChanged
         _screenRecorder = screenRecorder;
 
         StartShareCommand = new DelegateCommand(ScreenShareButtonClick, (x) => true);
-        StartVoiceCommand = new DelegateCommand(StartVoice, (x) => true);
+        StartVoiceCommand = new DelegateCommand(VoiceButtonClick, (x) => true);
 
         _isRecording = false;
         _screenShareButtonContent = "Start Screen Share";
         _recordFps = 30;
         _recorderLoop = new System.Timers.Timer(1000 / _recordFps);
         _recorderLoop.Elapsed += UpdateScreen;
+
+        _isMuted = true;
+        _voiceButtonContent = "On Mic";
     }
 
     private void ScreenShareButtonClick()
@@ -94,7 +98,7 @@ public class MainPageViewModel : INotifyPropertyChanged
         //    _dispatcherOperation
         //}
 
-        _dispatcherOperation = Application.Current.Dispatcher.BeginInvoke(() =>
+        Application.Current.Dispatcher.BeginInvoke(() =>
         {
             if (!_isRecording)
             {
@@ -105,7 +109,26 @@ public class MainPageViewModel : INotifyPropertyChanged
         });
     }
 
-    private void StartVoice()
+    private void VoiceButtonClick()
+    {
+        if (_isMuted)
+        {
+            _isMuted = false;
+            VoiceButtonContent = "Off Mic";
+            OnMic();
+            return;
+        }
+
+        _isMuted = true;
+        OffMic();
+        VoiceButtonContent = "On Mic";
+    }
+
+    private void OnMic()
+    {
+    }
+
+    private void OffMic()
     {
 
     }
@@ -128,6 +151,17 @@ public class MainPageViewModel : INotifyPropertyChanged
         {
             if (value == _screenShareButtonContent) return;
             _screenShareButtonContent = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string VoiceButtonContent
+    {
+        get => _voiceButtonContent;
+        set
+        {
+            if (value == _voiceButtonContent) return;
+            _voiceButtonContent = value;
             OnPropertyChanged();
         }
     }

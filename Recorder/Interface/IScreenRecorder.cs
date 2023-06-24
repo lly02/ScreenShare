@@ -7,7 +7,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Media;
 
-namespace ScreenShare.Recorder
+namespace ScreenShare.Recorder.Interface
 {
     public interface IScreenRecorder
     {
